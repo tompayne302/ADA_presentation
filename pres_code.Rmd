@@ -1,0 +1,360 @@
+---
+title: "ADA presentation analysis"
+author: "Tom Payne"
+date: '`r format(Sys.time(), "%Y-%m-%d %H:%M")`'
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    toc_float: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rms)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(jtools)
+library(broom)
+library(lme4)
+library(gt)
+library(gtsummary)
+library(pwr)
+library(janitor)
+library(patchwork)
+library(glmmTMB)
+library(ggeffects)
+library(effects)
+library(MuMIn)
+library(pscl)
+library(glmmTMB)
+library(MASS)
+library(performance)
+library(AER)
+library(patchwork)
+library(ggeffects)
+library(lmerTest)
+library(gtsummary)
+library(tidybayes)
+library(modelsummary)
+library(mgcv)
+library(DHARMa)
+
+knitr::opts_chunk$set(echo = F, message = F, warning = F, error = T, 
+                      fig.height = 4, out.width = "100%", 
+                      dev = "png", dpi = 300, cache = T)
+
+### Set filepaths 
+import_path_mac <- '/Users/thomaspayne/Documents/MPhil/ADA/'
+export_path_mac <- '/Users/thomaspayne/Documents/MPhil/ADA/'
+
+```
+
+``` {r}
+set.seed(123) # For reproducibility
+
+# Simulate CRP values for each category
+n_1 <- 170
+n_2 <- 453
+n_3 <- 334
+n_4 <- 397
+
+crp_1 <- runif(n_1, 0, 1)
+crp_2 <- runif(n_2, 1, 5)
+crp_3 <- runif(n_3, 5, 10)
+crp_4 <- runif(n_4, 10, 150) # assuming an upper limit of 150 for CRP values
+
+# Probability function for delirium with sharp increase at CRP > 100
+prob_delirium_1 <- function(crp) {
+  ifelse(crp > 100, 0.95, 0.5)
+}
+
+delirium_1_4 <- rbinom(n_4, 1, sapply(crp_4, prob_delirium_1))
+delirium_1_3 <- rbinom(n_3, 1, 0.48) # approximate to get close to 160 delirium cases
+delirium_1_2 <- rbinom(n_2, 1, 0.42) # approximate to get close to 189 delirium cases
+delirium_1_1 <- rbinom(n_1, 1, 0.38) # approximate to get close to 65 delirium cases
+
+dataset_1 <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_1_1, delirium_1_2, delirium_1_3, delirium_1_4)
+)
+
+### Dataset 2: Steady increase as CRP increases
+
+# Probability function for delirium with a steady increase
+prob_delirium_2 <- function(crp) {
+  pmin(0.2 + crp/150, 1)
+}
+
+delirium_2_4 <- rbinom(n_4, 1, sapply(crp_4, prob_delirium_2))
+delirium_2_3 <- rbinom(n_3, 1, 0.48) # as above
+delirium_2_2 <- rbinom(n_2, 1, 0.42) # as above
+delirium_2_1 <- rbinom(n_1, 1, 0.38) # as above
+
+dataset_2 <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_2_1, delirium_2_2, delirium_2_3, delirium_2_4)
+)
+
+```
+
+# Simulate and plot the data
+
+## Straight line
+
+``` {r fig.height = 4, fig.width = 7}
+set.seed(123) # For reproducibility
+
+# Simulate CRP values with a max of 50
+n_1 <- 170
+n_2 <- 453
+n_3 <- 334
+n_4 <- 397
+
+crp_1 <- runif(n_1, 0, 1)
+crp_2 <- runif(n_2, 1, 5)
+crp_3 <- runif(n_3, 5, 10)
+crp_4 <- runif(n_4, 10, 50)  # Adjusted to a maximum of 50 for CRP values
+
+# Simulating delirium cases for each bin
+delirium_1 <- rep(0, n_1)
+delirium_2 <- rep(0, n_2)
+delirium_3 <- rep(0, n_3)
+delirium_4 <- rep(0, n_4)
+
+delirium_1[sample(n_1, 65)] <- 1
+delirium_2[sample(n_2, 189)] <- 1
+delirium_3[sample(n_3, 160)] <- 1
+delirium_4[sample(n_4, 208)] <- 1
+
+# Combine the data
+dataset <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_1, delirium_2, delirium_3, delirium_4)
+)
+
+# Your GAM and plotting code remains the same:
+gam <-  gam(Delirium ~ s(CRP), data = dataset, family = binomial)
+
+marginaleffects::plot_predictions(gam, condition = c("CRP"), type = "response") + 
+          labs(x = "CRP", y = "Probability of delirium") + 
+          coord_cartesian(ylim = c(0,1)) +
+          theme_minimal() +
+          theme(legend.position = "none")
+
+
+```
+
+## Early rise, late fall
+
+``` {r fig.height = 4, fig.width = 7}
+set.seed(123) # For reproducibility
+
+# Simulate CRP values with a max of 50
+n_1 <- 170
+n_2 <- 453
+n_3 <- 334
+n_4 <- 397
+
+crp_1 <- runif(n_1, 0, 1)
+crp_2 <- runif(n_2, 1, 5)
+crp_3 <- runif(n_3, 5, 10)
+crp_4 <- runif(n_4, 10, 50)  # Max CRP value adjusted to 50
+
+# Revised "Squiggly" nonlinear function with moderated differences
+prob_delirium_squiggly <- function(crp) {
+  if (crp <= 2) {
+    return(0.7)
+  } else if (crp <= 5) {
+    return(0.55)
+  } else if (crp <= 15) {
+    return(0.75)
+  } else {
+    return(0.5)
+  }
+}
+
+prob_1 <- sapply(crp_1, prob_delirium_squiggly)
+prob_2 <- sapply(crp_2, prob_delirium_squiggly)
+prob_3 <- sapply(crp_3, prob_delirium_squiggly)
+prob_4 <- sapply(crp_4, prob_delirium_squiggly)
+
+delirium_1 <- rep(0, n_1)
+delirium_2 <- rep(0, n_2)
+delirium_3 <- rep(0, n_3)
+delirium_4 <- rep(0, n_4)
+
+top_indices_1 <- order(-prob_1)[1:65]
+top_indices_2 <- order(-prob_2)[1:189]
+top_indices_3 <- order(-prob_3)[1:160]
+top_indices_4 <- order(-prob_4)[1:208]
+
+delirium_1[top_indices_1] <- 1
+delirium_2[top_indices_2] <- 1
+delirium_3[top_indices_3] <- 1
+delirium_4[top_indices_4] <- 1
+
+# Combine the data
+dataset_moderate_squiggly <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_1, delirium_2, delirium_3, delirium_4)
+)
+
+
+gam <-  gam(Delirium ~ s(CRP), data = dataset_moderate_squiggly, family = binomial)
+
+marginaleffects::plot_predictions(gam, condition = c("CRP"), type = "response") + 
+          labs(x = "CRP", y = "Probability of delirium") + 
+          coord_cartesian(ylim = c(0,1)) +
+          theme_minimal() +
+          theme(legend.position = "none")
+```
+
+## Gradual curve off
+
+``` {r fig.height = 4, fig.width = 7}
+
+set.seed(123) # For reproducibility
+
+n_1 <- 170
+n_2 <- 453
+n_3 <- 334
+n_4 <- 397
+
+crp_1 <- runif(n_1, 0, 1)
+crp_2 <- runif(n_2, 1, 5)
+crp_3 <- runif(n_3, 5, 10)
+crp_4 <- runif(n_4, 10, 50)  # Max CRP value to 50
+
+# Use trig functions to make an even more pronounced squiggly relationship
+squiggly_prob <- function(crp) {
+  base_prob <- 0.6
+  if (crp < 1) {
+    return(base_prob + 0.3 * sin(10 * pi * crp))  # Dramatically increased amplitude and frequency
+  } else if (crp < 5) {
+    return(base_prob + 0.3 * sin(6 * pi * crp))  # Dramatically increased amplitude and frequency
+  } else if (crp < 10) {
+    return(base_prob + 0.3 * sin(4 * pi * crp))  # Dramatically increased amplitude and frequency
+  } else {
+    return(base_prob + 0.3 * sin(1 * pi * crp))  # Dramatically increased amplitude
+  }
+}
+
+prob_1 <- sapply(crp_1, squiggly_prob)
+prob_2 <- sapply(crp_2, squiggly_prob)
+prob_3 <- sapply(crp_3, squiggly_prob)
+prob_4 <- sapply(crp_4, squiggly_prob)
+
+delirium_1 <- rbinom(n_1, 1, prob_1)
+delirium_2 <- rbinom(n_2, 1, prob_2)
+delirium_3 <- rbinom(n_3, 1, prob_3)
+delirium_4 <- rbinom(n_4, 1, prob_4)
+
+# Adjust the probabilities so that we match the desired number of cases
+adjust_cases <- function(delirium, desired_cases) {
+  current_cases <- sum(delirium)
+  if (current_cases > desired_cases) {
+    indices_to_flip <- which(delirium == 1)
+    to_flip <- sample(indices_to_flip, current_cases - desired_cases)
+    delirium[to_flip] <- 0
+  } else if (current_cases < desired_cases) {
+    indices_to_flip <- which(delirium == 0)
+    to_flip <- sample(indices_to_flip, desired_cases - current_cases)
+    delirium[to_flip] <- 1
+  }
+  return(delirium)
+}
+
+delirium_1 <- adjust_cases(delirium_1, 65)
+delirium_2 <- adjust_cases(delirium_2, 189)
+delirium_3 <- adjust_cases(delirium_3, 160)
+delirium_4 <- adjust_cases(delirium_4, 208)
+
+dataset_very_curvy_squiggly_50 <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_1, delirium_2, delirium_3, delirium_4)
+)
+
+gam <-  gam(Delirium ~ s(CRP), data = dataset_very_curvy_squiggly_50, family = binomial)
+
+marginaleffects::plot_predictions(gam, condition = c("CRP"), type = "response") + 
+          labs(x = "CRP", y = "Probability of delirium") + 
+          coord_cartesian(ylim = c(0,1)) +
+          theme_minimal() +
+          theme(legend.position = "none")
+```
+
+## Early low, late high
+
+``` {r fig.height = 4, fig.width = 7}
+set.seed(123) # For reproducibility
+
+# Simulate CRP values with a max of 50
+n_1 <- 170
+n_2 <- 453
+n_3 <- 334
+n_4 <- 397
+
+crp_1 <- runif(n_1, 0, 1)
+crp_2 <- runif(n_2, 1, 5)
+crp_3 <- runif(n_3, 5, 10)
+crp_4 <- runif(n_4, 10, 50)  # Max CRP value adjusted to 50
+
+# Revised "Squiggly" nonlinear function with moderated differences
+prob_delirium_squiggly <- function(crp) {
+  if (crp <= 2) {
+    return(0.4)
+  } else if (crp <= 5) {
+    return(0.55)
+  } else if (crp >= 20) {
+    return(0.6)
+  } else if (crp >= 30) {
+    return(0.75)
+  } else {
+    return(0.5)
+  }
+}
+
+prob_1 <- sapply(crp_1, prob_delirium_squiggly)
+prob_2 <- sapply(crp_2, prob_delirium_squiggly)
+prob_3 <- sapply(crp_3, prob_delirium_squiggly)
+prob_4 <- sapply(crp_4, prob_delirium_squiggly)
+
+delirium_1 <- rep(0, n_1)
+delirium_2 <- rep(0, n_2)
+delirium_3 <- rep(0, n_3)
+delirium_4 <- rep(0, n_4)
+
+top_indices_1 <- order(-prob_1)[1:65]
+top_indices_2 <- order(-prob_2)[1:189]
+top_indices_3 <- order(-prob_3)[1:160]
+top_indices_4 <- order(-prob_4)[1:208]
+
+delirium_1[top_indices_1] <- 1
+delirium_2[top_indices_2] <- 1
+delirium_3[top_indices_3] <- 1
+delirium_4[top_indices_4] <- 1
+
+# Combine the data
+dataset_moderate_squiggly <- data.frame(
+  CRP = c(crp_1, crp_2, crp_3, crp_4),
+  Delirium = c(delirium_1, delirium_2, delirium_3, delirium_4)
+)
+
+
+gam <-  gam(Delirium ~ s(CRP), data = dataset_moderate_squiggly, family = binomial)
+
+marginaleffects::plot_predictions(gam, condition = c("CRP"), type = "response") + 
+          labs(x = "CRP", y = "Probability of delirium") + 
+          coord_cartesian(ylim = c(0,1)) +
+          theme_minimal() +
+          theme(legend.position = "none")
+```
+
